@@ -1,0 +1,198 @@
+---
+title: "DRC Battle Deaths"
+author: "Joe Wood"
+date: "October 12, 2017"
+output: html_document
+---
+# Question: 
+How many battle deaths will ACLED record in the Democratic Republic of the Congo in October 2017?								
+
+# Topic:
+The Armed Conflict Location and Event Dataset (ACLED) summarizes press reports on conflict and protest events in Africa and parts of Asia. Outcome will be determined by the "Realtime [Month of Interest] All Africa File" found on the Realtime Data page (ACLED - http://www.acleddata.com/data/realtime-data/). The count of battle deaths for the period of interest is obtained by summing the 'FATALITIES' column for events in which the 'COUNTRY' is the country of interest; 'EVENT_TYPE' is Battle-Government regains territory, Battle-No change of territory, or Battle-Non-state actor overtakes territory; and 'EVENT_DATE' falls in the period of interest. Question will be resolved when the relevant data is first released. 								
+
+For this question  I will examine the monthly and daily fatality rates in the Democratic Republic of the Congo in order to determine a forecast of likely battle deaths for the month of October 2017. 
+
+I will load a few packages that I will need to conduct this analysis.
+
+## Setup 
+
+```{r}
+library(lubridate) # for date-time manipulations
+library(psych) # for moving averages
+library(TTR)
+```
+
+First I will set the end date for this forecast
+```{r}
+end_date <- mdy('10/31/2017')
+```
+
+
+## Import and wrangle data
+
+I will import my data from the ACLED project
+```{r}
+df <- read.csv("X:\\Personal Development\\Data Science\\HFC\\data\\acled\\ACLED-All-Africa-File_20170101-to-20171007_csv.csv")
+```
+
+Next I will subset to the appropriate data based on the question parameters
+```{r}
+topic_df <- df[which(df$COUNTRY == 'Democratic Republic of Congo' & df$YEAR == 2017 & (df$EVENT_TYPE %in% c('Battle-No change of territory','Battle-Non-state actor overtakes territory','Battle-Government regains territory'))), ]
+```
+
+I will create a full date range from the 1st of the year to the most recent reported date 
+```{r}
+# convert table date to R date object
+topic_df$DATE<- mdy(topic_df$EVENT_DATE)
+
+full_range <- data.frame(DATE = seq(min(topic_df$DATE), max(topic_df$DATE), 'days'))
+
+daily_data <- merge(x = full_range, y = topic_df, by = "DATE", all.x = TRUE)
+
+daily_data$FATALITIES[is.na(daily_data$FATALITIES)] <- 0
+```
+
+Create a monthly variable and aggregate the number of fatalities by month
+```{r}
+daily_data$MONTH <- month(daily_data$DATE)
+
+monthly_df <- aggregate(daily_data$FATALITIES, by=list(daily_data$MONTH), FUN = sum)
+
+```
+
+
+## Analysis 1: Poisson Distribution
+This analysis will assume that battle deaths are randomly distributed according to the Poisson distribution.
+
+Using the mean for the year thus far, how likely is it that _x_ deaths will occur. 
+
+This will pay no consideration to the number of deaths that have already occurred this month
+
+```{r}
+# subset to all but this month
+a1_df <- aggdata[which(aggdata$Group.1 != month(today())),]
+
+lambda <- mean(a1_df$x)
+```
+
+
+### Bound 1 
+The probability of being less than 40
+```{r}
+prob1 <- ppois(39, lambda = mu)
+```
+
+### Bound 2 
+The probability of being between 40 and 100, inclusive
+```{r}
+prob2 <- ppois(100, lambda = mu) - ppois(39, lambda = mu)
+```
+
+### Bound 3 
+The probability of being greater than 100
+```{r}
+prob3 <- ppois(100, lambda = mu, lower=FALSE)
+```
+
+### Results 
+```{r}
+results.1 <- rbind(prob1,prob2,prob3)
+```
+
+
+
+## Analysis 2 
+This analysis will use the moving average of deaths for sliding periods to determine the likely number of deaths that will occur in the remainder of the month.
+
+This value will be added to the current recorded number of deaths. 
+
+```{r}
+current_deaths <- aggdata[which(aggdata$Group.1 == month(today())),2]
+```
+
+Set the most recent date for which data is available and find the number of remaining days in the period
+```{r}
+current_date <- max(daily_data$DATE)
+
+remaining_days <- as.numeric(end_date) - as.numeric(current_date) + 1 
+```
+
+Construct simple moving averages of a length equal to the number of remaining days
+```{r}
+moving_averages <- SMA(daily_data$FATALITIES, n = remaining_days) 
+
+moving_averages <- moving_averages[!is.na(moving_averages)]
+```
+
+
+For each bound, the number of current deaths will be subtracted from the number of required deaths, and the result will be divided by the number of remaining days, to find period average for the remainder of the month. This will then be compared to the actual moving averages to find the frequency with which moving averages of a comparable level were experienced. 
+
+### Bound 1: <40 deaths
+```{r}
+group1_max_death <- 39
+
+group1_max_rate <- (group1_max_death - current_deaths)/remaining_days
+
+prob1 <- length(moving_averages[moving_averages <= group1_max_rate])/length(moving_averages)
+```
+
+
+
+
+### Bound 2: 40 <= deaths <= 100
+```{r}
+group2_max_death <- 100
+
+group2_max_rate <- (group2_max_death - current_deaths)/remaining_days
+
+prob2 <- length(moving_averages[moving_averages <= group2_max_rate])/length(moving_averages) - prob1
+```
+
+
+
+### Bound 3: >100 deaths
+```{r}
+group3_min_rate <- group2_max_rate
+
+prob3 <- length(moving_averages[moving_averages > group2_max_rate])/length(moving_averages)
+```
+
+
+### Sanity Check
+The probabilities should sum to 1 
+```{r}
+prob1 + prob2 + prob3
+```
+
+### Results
+```{r}
+results.2 <- rbind(prob1,prob2,prob3)
+```
+
+
+## Average the results
+
+```{r}
+results <- data.frame(cbind(round(results.1,2),round(results.2,2)))
+
+results$avg <- round(rowSums(results)/ncol(results),2)
+results$avg
+```
+
+## Prorate bin 1 
+Given the number of fatalities that have occurred thus far and the multiple reports of ongoing battles, I think there is no chance of less than 40 fatalities this month, the probability assigned to that bin will be prorated to the others	
+
+```{r}
+results$subjective_probability[1] <- 0
+
+results$subjective_probability[2] <- round(results$avg[1] * results$avg[2]/(results$avg[2] + results$avg[3]) + results$avg[2],2)
+
+
+results$subjective_probability[3] <- round(results$avg[1] * results$avg[3]/(results$avg[2] + results$avg[3]) + results$avg[3],2)
+```
+
+
+
+
+
+

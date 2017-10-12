@@ -1,0 +1,161 @@
+---
+title: "Norwegian Kroner to US Dollar"
+author: "Joe"
+date: "10/2/2017"
+output: html_document
+---
+
+# Question: 
+What will the Norwegian Kroner to one U.S. Dollar daily exchange rate be on 31 October 2017?
+
+# Description: 
+This question will be resolved using the daily rate reported by Federal Reserve Economic Data (FRED) for the date of interest. Question will be suspended the day before the date of interest and resolved when the data is released, usually on Monday of the following week.
+
+
+```{r}
+# Set the working directory to the appropriate HFC folder
+setwd('X:\\Personal Development\\Data Science\\HFC\\norwegian_exchange_rate')
+```
+
+
+```{r}
+library(tseries) # Time series analysis
+library(timeSeries) # Linear interpolation method for missing data
+library(lubridate) # Date and time manipulations
+library(forecast) # For fitting an ARIMA model and doing forecasting
+```
+
+I will need to specify the end date for the forecast
+```{r}
+end_date <- ymd('20171031')
+```
+
+
+
+First off I think I'll import the data... 
+```{r}
+df <- read.csv('DEXNOUS.csv', stringsAsFactors = FALSE)
+```
+
+I will also create a full date range to fill in weekends and holidays where the market would be closed, so that I can develop a fully continuous time series with daily intervals
+
+```{r}
+# convert table date to R date object
+df$DATE<- mdy(df$DATE)
+
+full_range <- data.frame(DATE = seq(min(df$DATE), max(df$DATE), 'days'))
+
+daily_data <- merge(x = full_range, y = df, by = "DATE", all.x = TRUE)
+```
+
+I'll just note that because there are missing observations in the full time series (due to holidays, weekends, or other market closures) I will have to replace them in some fashion. For now, I will use a linear interpolation method until something better occurs to me. This could risk muting some of the true variability of the series, and I could try a few different methods later on and average out the results. 
+
+Another option entirely would be to aggregate to a weekly closing, though this is spoiled a bit by the requirement to forecast a daily closing. Because the 31st is a Tuesday, I could start my time series on a Wednesday so the weekly closing would be the same as the daily closing for my time frame. This could take a good bit more cleaning. Also, I would still be spoiled by weeks where there is a holiday on Tuesday
+
+But ah, I digress. To the time series!! 
+
+```{r}
+# Interpolate the missing obs 
+daily_data$DEXNOUS <- round(interpNA(as.numeric(daily_data$DEXNOUS), method = "linear"),2)
+
+# Create a time series of object with a frequency of 365 to represent that the data is daily
+myts <- ts(daily_data$DEXNOUS, frequency = 365)
+
+plot(myts)
+```
+
+
+
+
+
+Now I will fit an exponential model to the time series using the automatic model specification
+```{r}
+fit <- HoltWinters(myts)
+```
+
+I will use this exponential model to forecast a range of observations 
+```{r}
+myfcast <- forecast(fit, h = (end_date - max(daily_data$DATE)), level = c(50,75,80,95) )
+```
+
+A plot of the forecast 
+```{r}
+plot(myfcast)
+```
+
+Based on the mean and available intervals, we can calculate a standard deviation. 
+
+This can be used to calculate the appropriate mount for the buckets on GJopen 
+
+```{r}
+mean <- myfcast$mean[(end_date - max(daily_data$DATE))]
+
+# 1.15 is the z-Score for a 75% confidence interval 
+stddev <- as.numeric((myfcast$lower[(end_date - max(daily_data$DATE)),2] - mean)/ (-1.15))
+```
+
+Interval 1 
+< 7.58
+```{r}
+z1 <- (7.57 - mean) / stddev
+z1
+prob1 <- round(pnorm(z1)*100,0)
+prob1
+```
+
+Interval 2
+7.58 <= x <= 7.72
+```{r}
+z2l <- (7.58 - mean) / stddev
+z2l
+z2u <- (7.72 - mean) / stddev
+z2u
+prob2 <- round(pnorm(z2u)*100,0) - round(pnorm(z2l)*100,0)
+prob2
+```
+
+Interval 3
+7.72 < x < 7.83
+```{r}
+z3l <- (7.72 - mean) / stddev
+z3l
+z3u <- (7.83 - mean) / stddev
+z3u
+prob3 <- round(pnorm(z3u)*100,0) - round(pnorm(z3l)*100,0)
+prob3
+```
+
+Interval 4
+7.83 <= x <= 7.97
+```{r}
+z4l <- (7.83 - mean) / stddev
+z4l
+z4u <- (7.97 - mean) / stddev
+z4u
+prob4 <- round(pnorm(z4u)*100,0) - round(pnorm(z4l)*100,0)
+prob4
+```
+
+Interval 5
+x > 7.97
+```{r}
+z5 <- (7.97 - mean) / stddev
+z5
+prob5 <- 100 - round(pnorm(z5)*100,0)
+prob5
+```
+
+
+Sanity check
+```{r}
+prob1 + prob2 + prob3 + prob4 + prob5
+```
+
+
+
+## Simple forecast to today's date
+
+```{r}
+paste("Today, the forecast would have predicted a rate of", round(myfcast$mean[(today() - max(daily_data$DATE))],2))
+```
+

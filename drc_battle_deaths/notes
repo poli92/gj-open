@@ -1,0 +1,26 @@
+---
+title: "DRC Battle Deaths"
+author: "Joe Wood"
+date: "October 12, 2017"
+output: html_document
+---
+# Question: 
+How many battle deaths will ACLED record in the Democratic Republic of the Congo in October 2017?								
+
+# Topic:
+The Armed Conflict Location and Event Dataset (ACLED) summarizes press reports on conflict and protest events in Africa and parts of Asia. Outcome will be determined by the "Realtime [Month of Interest] All Africa File" found on the Realtime Data page (ACLED - http://www.acleddata.com/data/realtime-data/). The count of battle deaths for the period of interest is obtained by summing the 'FATALITIES’ column for events in which the 'COUNTRY’ is the country of interest; 'EVENT_TYPE’ is Battle-Government regains territory, Battle-No change of territory, or Battle-Non-state actor overtakes territory; and 'EVENT_DATE' falls in the period of interest. Question will be resolved when the relevant data is first released. 								
+
+For this question  I will examine the monthly and daily fatality rates in the Democratic Republic of the Congo in order to determine a forecast of likely battle deaths for the month of October 2017. 
+
+I will load a few packages that I will need to conduct this analysis.
+
+```{r}
+library(lubridate) # for date-time manipulations
+library(psych) # for moving averages
+library(TTR)
+```
+
+Next I will import my data from the ACLED project
+```{r}
+df <- read.csv("X:\\Personal Development\\Data Science\\HFC\\data\\acled\\ACLED-All-Africa-File_20170101-to-20171007_csv.csv")
+```

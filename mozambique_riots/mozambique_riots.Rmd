@@ -1,0 +1,133 @@
+---
+title: "Mozambique Riots/Protests"
+output:
+  html_document: default
+  html_notebook: default
+---
+
+# Question: 
+Will ACLED record any riot/protest events in Mozambique in October 2017?
+
+# Description: 
+The Armed Conflict Location and Event Dataset (ACLED) summarizes press reports on conflict and protest events in Africa and parts of Asia. Outcome will be determined by the "Realtime [Month of Interest] All Africa File" found on the Realtime Data page (ACLED). The question will resolve as "yes" if ACLED records any event for which: 'COUNTRY' is the country of interest; 'EVENT_DATE' falls in the period of interest; and 'EVENT_TYPE' is 'Riots/Protests'. The question will be resolved when the relevant data is first released.
+
+# Code
+Import libraries and ACLED dataset 
+```{r}
+library(lubridate) # date manipulations
+library(psych)
+library(TTR)
+library(tm) # text mining
+library(SnowballC) # text stemming
+library(wordcloud) # wordcloud rendering
+
+df <- read.csv("/Users/josephwood/Dropbox/R/HFC/mozambique_riots/ACLED-Version-7-All-Africa-1997-2016_csv_dyadic-file.csv", header=FALSE, encoding = "latin1", stringsAsFactors = FALSE)
+
+#reconvert first row to header
+colnames(df) = df[1, ] # the first row will be the header
+df = df[-1, ]          # removing the first row.
+```
+
+Subset to relevant Mozambique data and convert EVENT_TYPE to character
+```{r}
+moz_data <- df[which(df$COUNTRY == 'Mozambique' & (df$EVENT_TYPE %in% c('Riots/Protests'))), ]
+```
+
+Create a date variable consistent with a normal R date 
+```{r}
+moz_data$DATE <- as.Date(moz_data$EVENT_DATE, format = "%d/%m/%Y")
+```
+
+
+Create a vector of every day from 1/1/2007 to 12/31/2016
+```{r}
+full_range <- data.frame(DATE = seq(as.Date('2007/1/1'), as.Date('2016/12/31'), 'days'))
+```
+
+Merge the two datasets and a flag for dates on which a riot or protest occurred 
+```{r}
+daily_data <- merge(x = full_range, y = moz_data, by = "DATE", all.x = TRUE)
+
+daily_data$EVENT_FLAG[daily_data$EVENT_TYPE == 'Riots/Protests'] <- 1
+
+daily_data$EVENT_FLAG[is.na(daily_data$EVENT_TYPE)] <- 0
+```
+
+Aggregate the data by day 
+```{r}
+agg_data <- aggregate(daily_data$EVENT_FLAG, by=list(daily_data$DATE), FUN = mean)
+```
+
+Plot the days with events 
+```{r}
+plot(agg_data$x ~ agg_data$Group.1)
+```
+
+## Daily likelihood
+
+Find the daily likelihood of an event
+```{r}
+daily_likelihood <- mean(agg_data$x)
+daily_likelihood
+```
+
+So, on any given day there is roughly a 3.9% chance that a protest or riot will occur. 
+
+Find the number of days in October
+```{r}
+end_date <- as.Date('2017-10-31')
+
+start_date <- as.Date('2017-10-1')
+
+num_days <- as.numeric(end_date) - as.numeric(start_date) + 1 
+```
+
+Calculate the likelihood of an event in the month of October
+```{r}
+1 - (1 - daily_likelihood)**num_days
+```
+
+## Monthly likelihood
+
+Aggregate the data by month
+```{r}
+agg_data <- aggregate(daily_data$EVENT_FLAG, by=list(format(daily_data$DATE, "%Y-%m")), FUN = mean)
+
+agg_data$x[agg_data$x != 0] <- 1
+```
+
+Calculate monthly likelihood
+```{r}
+monthly_likelihood <- mean(agg_data$x)
+monthly_likelihood
+```
+
+Use the average of these likelihoods 
+```{r}
+((1 - (1 - daily_likelihood)**num_days) + monthly_likelihood)/2
+```
+
+## Word Cloud
+
+I want to try to determine common elements among the event descriptions, so I am going to create a wordcloud 
+
+Create a corpus
+```{r}
+mozCorpus <- Corpus(VectorSource(moz_data$NOTES))
+```
+
+Remove punctuation and stopwords from corpus
+```{r}
+mozCorpus <- tm_map(mozCorpus, removePunctuation)
+mozCorpus <- tm_map(mozCorpus, removeWords, stopwords('english'))
+```
+
+Perform stemming - words are converted to their stem so as not to duplicate root words that are used in different forms
+```{r}
+mozCorpus <- tm_map(mozCorpus, stemDocument)
+```
+
+Plot the word cloud
+```{r}
+wordcloud(mozCorpus, max.words = 100, random.order = FALSE, colors=brewer.pal(8, "Dark2"))
+```

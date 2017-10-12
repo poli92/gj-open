@@ -1,0 +1,193 @@
+---
+title: "Australian Short-Term Interest Rates"
+author: "Joe Wood"
+date: "October 5, 2017"
+output: html_document
+---
+
+# Question:
+What will the short-term interest rate be for Australia (AUS) in October 2017?
+
+# Description:
+This question will be resolved using monthly data reported by the Organization for Economic Cooperation and Development (OECD). Data is retrievable via download or on the 'Short-term interest rates' table on the web site.  The relevant country can be found in the HIGHLIGHTED COUNTRIES or LOCATION field, and the relevant time period can be found in the TIME field. Values will be rounded to the nearest one-hundredth. Question will be resolved when the data is released, likely the month after the period of interest.
+
+```{r}
+# Set the working directory to the appropriate HFC folder
+setwd('X:\\Personal Development\\Data Science\\HFC\\aus_short_interest')
+```
+
+
+```{r}
+library(tseries) # Time series analysis
+library(timeSeries) # Linear interpolation method for missing data
+library(lubridate) # Date and time manipulations
+library(forecast) # For fitting an ARIMA model and doing forecasting
+```
+
+First off I think I'll import the data... 
+```{r}
+df <- read.csv('data.csv', stringsAsFactors = FALSE)
+```
+
+## Exponential forecast using Holt-Winters model fitting 
+
+```{r}
+# Create a time series of object with a frequency of 12 to represent that the data is monthly
+myts <- ts(df$Value, frequency = 12, start=c(2012,9))
+
+plot(myts)
+```
+
+Now I will fit an exponential model to the time series using the automatic model specification. This will require something other than the Holt-Winters method, which requires 2 or more periods. 
+```{r}
+fit <- HoltWinters(myts)
+```
+
+
+I will use this exponential model to forecast a range of observations 
+```{r}
+myfcast <- forecast(fit, h = 1, level = c(50,75,80,95) )
+myfcast
+```
+
+A plot of the forecast 
+```{r}
+plot(myfcast)
+```
+
+
+Based on the mean and available intervals, we can calculate a standard deviation. 
+
+This can be used to calculate the appropriate mount for the buckets on GJopen 
+
+```{r}
+mean <- as.numeric(myfcast$mean[1])
+
+# 1.15 is the z-Score for a 75% confidence interval 
+stddev <- as.numeric((myfcast$lower[1,2] - mean)/ (-1.15))
+```
+
+
+Interval 1 
+< 1.68
+```{r}
+z1 <- (1.68 - mean) / stddev
+z1
+prob1 <- round(pnorm(z1)*100,0)
+prob1
+```
+
+Interval 2
+1.68 <= x <= 1.72
+```{r}
+z2l <- (1.68 - mean) / stddev
+z2l
+z2u <- (1.72 - mean) / stddev
+z2u
+prob2 <- round(pnorm(z2u)*100,0) - round(pnorm(z2l)*100,0)
+prob2
+```
+
+Interval 3
+x > 1.72
+```{r}
+z3 <- (1.72 - mean) / stddev
+z3
+prob3 <- 100 - round(pnorm(z3)*100,0)
+prob3
+```
+
+
+Sanity check
+```{r}
+prob1 + prob2 + prob3
+```
+
+# Distribution developed using standard deviation since last changed in Government Interest Rate
+
+I am making the assumption here that the standard deviation will be driven a lot by changes in the official interest rate, and since the official interest rate has changed recently, I only want the variance due to 'random' effects
+
+
+I will only use data since August 2016, the period when the official rate was last updated. 
+```{r}
+subset_df <- df[which(df$TIME >= "2016-08"), ]
+```
+
+Get the standard deviation of the interest rate over this period (as opposed to the one used in the initial model)
+```{r}
+alt_sd <- sd(subset_df$Value)
+```
+
+Interval 1 
+< 1.68
+```{r}
+z1 <- (1.68 - mean) / alt_sd
+z1
+prob1 <- round(pnorm(z1)*100,0)
+prob1
+```
+
+Interval 2
+1.68 <= x <= 1.72
+```{r}
+z2l <- (1.68 - mean) / alt_sd
+z2l
+z2u <- (1.72 - mean) / alt_sd
+z2u
+prob2 <- round(pnorm(z2u)*100,0) - round(pnorm(z2l)*100,0)
+prob2
+```
+
+Interval 3
+x > 1.72
+```{r}
+z3 <- (1.72 - mean) / alt_sd
+z3
+prob3 <- 100 - round(pnorm(z3)*100,0)
+prob3
+```
+
+
+Sanity check
+```{r}
+prob1 + prob2 + prob3
+```
+
+# Assume the rate is unlikely to change
+
+In this case I will just say that there is a fixed chance P(x = 1.72) that the rate will remain at exactly 1.72
+
+Therefore any other bucket can contain at most 1 - P(x = 1.72) of the probability
+
+Using the probability masses that we calculated before, we can determine how much of the remaining probability each interval would receive
+
+Set the value for P(x = 1.72)
+```{r}
+P <- .50
+```
+
+
+Interval 1 
+< 1.68
+```{r}
+alt_prob1 <- round(prob1 * (1-P),0)
+alt_prob1
+```
+Interval 2
+1.68 <= x <= 1.72
+```{r}
+alt_prob2 <- round(prob2 * (1-P),0) + (P*100) #adding the probability of being exactly 1.72
+alt_prob2
+```
+
+Interval 3 
+x > 1.72
+```{r}
+alt_prob3 <- round(prob3 * .5,0)
+alt_prob3
+```
+
+Sanity check
+```{r}
+alt_prob1 + alt_prob2 + alt_prob3
+```

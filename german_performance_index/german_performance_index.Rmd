@@ -1,0 +1,151 @@
+---
+title: "German Performance Index"
+author: "Joe Wood"
+date: "October 5, 2017"
+output: html_document
+---
+
+# Question: 
+What will the daily closing price of Germany's DAX PERFORMANCE-INDEX (INDEXDB: DAX) be on 31 October 2017?
+
+# Description: 
+This question will be resolved using the daily closing price of the market of interest reported by Google Finance. Question will be suspended the day before the date of interest and resolved the day after the date of interest.
+
+
+
+```{r}
+# Set the working directory to the appropriate HFC folder
+setwd('X:\\Personal Development\\Data Science\\HFC\\german_performance_index')
+```
+
+
+```{r}
+library(tseries) # Time series analysis
+library(timeSeries) # Linear interpolation method for missing data
+library(lubridate) # Date and time manipulations
+library(forecast) # For fitting an ARIMA model and doing forecasting
+```
+
+
+I will need to specify the end date for the forecast
+```{r}
+end_date <- ymd('20171031')
+```
+
+
+
+
+First off I think I'll import the data... 
+```{r}
+df <- read.csv('^GDAXI.csv', stringsAsFactors = FALSE)
+```
+
+I will also create a full date range to fill in weekends and holidays where the market would be closed, so that I can develop a fully continuous time series with daily intervals
+
+```{r}
+# convert table date to R date object
+df$DATE<- mdy(df$Date)
+
+full_range <- data.frame(DATE = seq(min(df$DATE), max(df$DATE), 'days'))
+
+daily_data <- merge(x = full_range, y = df, by = "DATE", all.x = TRUE)
+```
+
+I'll just note that because there are missing observations in the full time series (due to holidays, weekends, or other market closures) I will have to replace them in some fashion. For now, I will use a linear interpolation method until something better occurs to me. This could risk muting some of the true variability of the series, and I could try a few different methods later on and average out the results. 
+
+Another option entirely would be to aggregate to a weekly closing, though this is spoiled a bit by the requirement to forecast a daily closing. Because the 31st is a Tuesday, I could start my time series on a Wednesday so the weekly closing would be the same as the daily closing for my time frame. This could take a good bit more cleaning. Also, I would still be spoiled by weeks where there is a holiday on Tuesday
+
+But ah, I digress. To the time series!! 
+
+```{r}
+# Interpolate the missing obs 
+daily_data$Close <- round(interpNA(as.numeric(daily_data$Close), method = "linear"),2)
+
+# Create a time series of object with a frequency of 365 to represent that the data is daily
+myts <- ts(daily_data$Close, frequency = 365)
+
+plot(myts)
+```
+
+Now I will fit an exponential model to the time series using the automatic model specification
+```{r}
+fit <- HoltWinters(myts)
+```
+
+I will use this exponential model to forecast a range of observations 
+```{r}
+myfcast <- forecast(fit, h = (end_date - max(daily_data$DATE)), level = c(50,75,80,95) )
+```
+
+
+A plot of the forecast 
+```{r}
+plot(myfcast)
+```
+
+The forecasted value for the end of the period 
+```{r}
+paste("The point estimate is", round(myfcast$mean[(end_date - max(daily_data$DATE))],2))
+
+paste("There is a 50% chance that the value will be between",round(myfcast$lower[(end_date - max(daily_data$DATE)),1],2), "and", round(myfcast$upper[(end_date - max(daily_data$DATE)),1],2))
+
+paste("There is a 75% chance that the value will be between",round(myfcast$lower[(end_date - max(daily_data$DATE)),2],2), "and", round(myfcast$upper[(end_date - max(daily_data$DATE)),2],2))
+
+paste("There is a 80% chance that the value will be between",round(myfcast$lower[(end_date - max(daily_data$DATE)),3],2), "and", round(myfcast$upper[(end_date - max(daily_data$DATE)),3],2))
+
+paste("There is a 95% chance that the value will be between",round(myfcast$lower[(end_date - max(daily_data$DATE)),4],2), "and", round(myfcast$upper[(end_date - max(daily_data$DATE)),4],2))
+
+```
+
+Based on the mean and available intervals, we can calculate a standard deviation. 
+
+This can be used to calculate the appropriate mount for the buckets on GJopen 
+
+```{r}
+mean <- as.numeric(myfcast$mean[(end_date - max(daily_data$DATE))])
+
+# 1.15 is the z-Score for a 75% confidence interval 
+stddev <- as.numeric((myfcast$lower[(end_date - max(daily_data$DATE)),2] - mean)/ (-1.15))
+```
+
+Interval 1 
+< 11897.71
+```{r}
+z1 <- (11897.71 - mean) / stddev
+z1
+prob1 <- round(pnorm(z1)*100,0)
+prob1
+```
+
+Interval 2
+11897.71 <= x <= 12213.98
+```{r}
+z2l <- (11897.71 - mean) / stddev
+z2l
+z2u <- (12213.98 - mean) / stddev
+z2u
+prob2 <- round(pnorm(z2u)*100,0) - round(pnorm(z2l)*100,0)
+prob2
+```
+
+Interval 3
+x > 12213.98
+```{r}
+z3 <- (12213.98 - mean) / stddev
+z3
+prob3 <- 100 - round(pnorm(z3)*100,0)
+prob3
+```
+
+
+Sanity check
+```{r}
+prob1 + prob2 + prob3
+```
+
+
+## Simple forecast to today's date
+
+```{r}
+paste("Today, the forecast would have predicted a rate of", round(myfcast$mean[(today() - max(daily_data$DATE))],2))
+```
